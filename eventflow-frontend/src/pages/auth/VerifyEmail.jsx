@@ -1,0 +1,157 @@
+// src/pages/auth/VerifyEmail.jsx
+import { useEffect, useState, useRef } from "react";
+import { useSearchParams, useNavigate, Link } from "react-router-dom";
+import { verifyOtp } from "../../api/auth";
+import { useAuth } from "../../context/AuthContext";
+import { motion } from "framer-motion";
+import { CheckCircle, XCircle, ArrowRight } from "lucide-react";
+
+export default function VerifyEmail() {
+  const [params] = useSearchParams();
+  const navigate = useNavigate();
+  const { login } = useAuth();
+  const [status, setStatus] = useState("verifying"); // verifying | success | error
+  const [message, setMessage] = useState("Verifying your email...");
+  const hasRun = useRef(false); // prevent React 18 StrictMode double-fire
+
+  const email = params.get("email") || "";
+  const otp = params.get("otp") || "";
+
+  useEffect(() => {
+    // Prevent double-execution in React 18 StrictMode
+    if (hasRun.current) return;
+    hasRun.current = true;
+
+    if (!email || !otp) {
+      setStatus("error");
+      setMessage("Invalid verification link. Please try registering again.");
+      return;
+    }
+
+    const verify = async () => {
+      try {
+        // The backend now handles everything:
+        // 1. Verifies the OTP
+        // 2. Auto-registers the user using server-stored pending data
+        // 3. Returns a JWT token if registration succeeded
+        const { data } = await verifyOtp({ email, otp });
+
+        // Clean up localStorage fallback data
+        localStorage.removeItem("pendingRegistration");
+
+        if (data.registered && data.token && data.user) {
+          // Auto-registration succeeded — log in and redirect
+          login(data.user, data.token);
+
+          setStatus("success");
+          setMessage("Account created successfully! Redirecting to your dashboard...");
+
+          setTimeout(() => {
+            if (data.user.role === "admin") navigate("/admin");
+            else if (data.user.role === "organizer") navigate("/organizer");
+            else navigate("/dashboard");
+          }, 1500);
+        } else if (data.already_exists) {
+          // Account already exists — just redirect to login
+          setStatus("success");
+          setMessage("Your account is already set up! Please sign in.");
+        } else {
+          // Verified but no auto-registration (legacy / edge case)
+          setStatus("success");
+          setMessage("Email verified successfully! You can now sign in.");
+        }
+      } catch (err) {
+        const errorMsg = err.response?.data?.error || "";
+
+        if (errorMsg.includes("already exists")) {
+          localStorage.removeItem("pendingRegistration");
+          setStatus("success");
+          setMessage("Your account is already set up! Please sign in.");
+        } else {
+          setStatus("error");
+          setMessage(errorMsg || "Verification failed. The link may have expired or been used.");
+        }
+      }
+    };
+
+    verify();
+  }, []); // empty deps — runs once, hasRun.current prevents StrictMode double-fire
+
+  const icon = {
+    verifying: (
+      <div style={{
+        width: 48, height: 48, border: "3px solid rgba(184,146,78,0.2)",
+        borderTopColor: "var(--gold)", borderRadius: "50%",
+        animation: "spin 0.8s linear infinite",
+      }} />
+    ),
+    success: <CheckCircle size={48} style={{ color: "#22c55e" }} />,
+    error: <XCircle size={48} style={{ color: "#ef4444" }} />,
+  };
+
+  return (
+    <div className="auth-layout" style={{ paddingTop: 0 }}>
+
+      <div className="auth-visual">
+        <Link to="/" className="auth-visual-brand">Event<em>Flow</em></Link>
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.6 }}
+        >
+          <h2 className="auth-visual-headline">
+            Email<br /><em>Verification</em>
+          </h2>
+        </motion.div>
+      </div>
+
+      <motion.div
+        className="auth-form-panel"
+        initial={{ opacity: 0, x: 30 }}
+        animate={{ opacity: 1, x: 0 }}
+        transition={{ duration: 0.6 }}
+      >
+        <div style={{
+          maxWidth: 420, width: "100%", margin: "0 auto",
+          display: "flex", flexDirection: "column", alignItems: "center",
+          justifyContent: "center", minHeight: "50vh", textAlign: "center",
+          gap: "1.5rem",
+        }}>
+          {icon[status]}
+
+          <h2 style={{
+            fontSize: "1.5rem", fontWeight: 700,
+            color: status === "error" ? "#ef4444" : "var(--white)",
+          }}>
+            {status === "verifying" && "Verifying..."}
+            {status === "success" && "Verified!"}
+            {status === "error" && "Verification Failed"}
+          </h2>
+
+          <p style={{ color: "var(--muted)", fontSize: "0.9rem", lineHeight: 1.6 }}>
+            {message}
+          </p>
+
+          {status === "error" && (
+            <Link to="/register" className="btn btn-primary btn-lg" style={{ marginTop: "1rem" }}>
+              <ArrowRight size={16} /> Try Again
+            </Link>
+          )}
+
+          {status === "success" && (
+            <Link to="/login" className="btn btn-primary btn-lg" style={{ marginTop: "1rem" }}>
+              <ArrowRight size={16} /> Go to Sign In
+            </Link>
+          )}
+        </div>
+      </motion.div>
+
+      <style>{`
+        @keyframes spin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
+      `}</style>
+    </div>
+  );
+}
